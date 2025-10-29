@@ -1,2 +1,9 @@
-.xml
+*.xml
+*.pyc
+__pycache__/
+.env
+venv/
+.idea/
+*.log
+.DS_Store   
 

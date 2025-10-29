@@ -222,20 +222,43 @@ class InvoiceAuditTool(BaseTool):
     def _perform_audit(self, invoice: Dict, validator: InvoiceValidator) -> Dict:
         issues = []
         
-        # Check tax calculations
-        if not self._validate_tax_calculations(invoice, validator.tax_rules):
-            issues.append("Cálculos dos impostos estão incorretos")
-            
-        # Check fiscal codes
-        if not self._validate_fiscal_codes(invoice):
-            issues.append("Códigos fiscais inconsistentes detectados")
-            
-        # Check purchase order alignment
-        if not self._validate_purchase_order(invoice):
-            issues.append("Divergência entre pedido de compra e nota fiscal")
+        # Check basic required fields
+        if not invoice.get('numero_nf'):
+            issues.append("Número da NF ausente")
+        if not invoice.get('data_emissao'):
+            issues.append("Data de emissão ausente")
+        
+        # Check emitente info
+        emitente = invoice.get('emitente', {})
+        if not emitente.get('cnpj'):
+            issues.append("CNPJ do emitente ausente")
+        if not emitente.get('nome'):
+            issues.append("Nome do emitente ausente")
+        
+        # Check destinatario info
+        destinatario = invoice.get('destinatario', {})
+        if not destinatario.get('cnpj'):
+            issues.append("CNPJ do destinatário ausente")
+        if not destinatario.get('nome'):
+            issues.append("Nome do destinatário ausente")
+        
+        # Check products
+        produtos = invoice.get('produtos', [])
+        if not produtos:
+            issues.append("Nenhum produto encontrado na nota fiscal")
+        
+        # Validate total value
+        valor_total = invoice.get('valor_total', 0)
+        if valor_total <= 0:
+            issues.append("Valor total da nota fiscal inválido")
+        
+        # Compare calculated total with declared total
+        calc_total = sum(prod.get('valor_total', 0) for prod in produtos)
+        if abs(calc_total - valor_total) > 0.01:  # Allow for small floating point differences
+            issues.append(f"Divergência no valor total: declarado {valor_total}, calculado {calc_total}")
             
         return {
-            "invoice_id": invoice.get("invoice_id"),
+            "numero_nf": invoice.get('numero_nf', 'N/A'),
             "audit_date": datetime.now().isoformat(),
             "issues": issues,
             "status": "FAILED" if issues else "PASSED"
@@ -257,7 +280,7 @@ class InvoiceAuditTool(BaseTool):
         report = f"""
         Relatório de Auditoria da Nota Fiscal
         ------------------------------------
-        Número da NF: {audit_results['invoice_id']}
+        Número da NF: {audit_results['numero_nf']}
         Data da Auditoria: {audit_results['audit_date']}
         Status: {'FALHOU' if audit_results['status'] == 'FAILED' else 'APROVADO'}
         
@@ -281,48 +304,45 @@ class NFSystem:
         """Formata os dados da nota fiscal de forma legível."""
         output = []
         output.append("=== DADOS DA NOTA FISCAL ===\n")
-        output.append(f"Número da NF: {invoice['invoice_id']}")
-        output.append(f"Cliente ID: {invoice['customer_id']}")
-        output.append(f"Fornecedor ID: {invoice['supplier_id']}")
+        
+        # Informações básicas da NF
+        output.append(f"Número da NF: {invoice.get('numero_nf', 'N/A')}")
+        output.append(f"Data de Emissão: {invoice.get('data_emissao', 'N/A')}")
+        
+        # Informações do Emitente
+        emitente = invoice.get('emitente', {})
+        output.append("\nEMITENTE:")
+        output.append(f"Nome: {emitente.get('nome', 'N/A')}")
+        output.append(f"CNPJ: {emitente.get('cnpj', 'N/A')}")
+        
+        # Informações do Destinatário
+        destinatario = invoice.get('destinatario', {})
+        output.append("\nDESTINATÁRIO:")
+        output.append(f"Nome: {destinatario.get('nome', 'N/A')}")
+        output.append(f"CNPJ: {destinatario.get('cnpj', 'N/A')}")
         
         # Items
         output.append("\nITENS:")
-        output.append("-" * 60)
-        output.append(f"{'Descrição':<30} {'Qtd':<8} {'Valor Unit.':<15} {'Total':<15}")
-        output.append("-" * 60)
+        output.append("-" * 70)
+        output.append(f"{'Código':<10} {'Descrição':<30} {'Qtd':<8} {'Valor Unit.':<10} {'Total':<10}")
+        output.append("-" * 70)
         
-        total_items = 0.0
-        for item in invoice['items']:
-            unit_price = float(item['unit_price'])
-            quantity = float(item['quantity'])
-            total = unit_price * quantity
-            total_items += total
-            
+        produtos = invoice.get('produtos', [])
+        for produto in produtos:
             output.append(
-                f"{item['description']:<30} "
-                f"{quantity:<8.0f} "
-                f"{self._format_currency(unit_price):<15} "
-                f"{self._format_currency(total):<15}"
+                f"{produto.get('codigo', 'N/A'):<10} "
+                f"{produto.get('descricao', 'N/A')[:30]:<30} "
+                f"{produto.get('quantidade', 0):<8.0f} "
+                f"{self._format_currency(produto.get('valor_unitario', 0)):<10} "
+                f"{self._format_currency(produto.get('valor_total', 0)):<10}"
             )
         
-        output.append("-" * 60)
-        output.append(f"{'Subtotal:':<39} {self._format_currency(total_items):>20}")
-        
-        # Impostos
-        output.append("\nIMPOSTOS:")
-        output.append("-" * 40)
-        total_taxes = 0.0
-        for tax_name, tax_value in invoice['taxes'].items():
-            total_taxes += float(tax_value)
-            output.append(f"{tax_name:<20} {self._format_currency(float(tax_value)):>19}")
-        
-        output.append("-" * 40)
-        output.append(f"{'Total Impostos:':<20} {self._format_currency(total_taxes):>19}")
+        output.append("-" * 70)
         
         # Total Geral
-        output.append("\n" + "=" * 40)
-        output.append(f"{'TOTAL NF:':<20} {self._format_currency(float(invoice['total'])):>19}")
-        output.append("=" * 40)
+        valor_total = invoice.get('valor_total', 0)
+        output.append(f"\n{'TOTAL NF:':<20} {self._format_currency(valor_total):>10}")
+        output.append("=" * 70)
         
         return "\n".join(output)
 
