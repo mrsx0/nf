@@ -289,6 +289,92 @@ class InvoiceAuditTool(BaseTool):
         """
         return report
 
+class NFSystemGUI:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Sistema de Análise de Notas Fiscais")
+        self.root.geometry("800x600")
+        
+        self.nf_system = NFSystem()
+        
+        # Criar frame principal
+        main_frame = tk.Frame(self.root, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Frame superior para botões
+        button_frame = tk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Botões
+        tk.Button(button_frame, text="Selecionar Arquivo", command=self.select_file).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Analisar NF", command=self.analyze_invoice).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Salvar Resultados", command=self.save_results).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Limpar", command=self.clear_display).pack(side=tk.LEFT, padx=5)
+        
+        # Área de texto com scrollbar
+        text_frame = tk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.scrollbar = tk.Scrollbar(text_frame)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.text_display = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=self.scrollbar.set)
+        self.text_display.pack(fill=tk.BOTH, expand=True)
+        
+        self.scrollbar.config(command=self.text_display.yview)
+        
+        # Barra de status
+        self.status_var = tk.StringVar()
+        self.status_var.set("Pronto")
+        status_label = tk.Label(main_frame, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        status_label.pack(fill=tk.X, side=tk.BOTTOM, pady=(5, 0))
+    
+    def select_file(self):
+        success, message = self.nf_system.select_file()
+        if success:
+            self.status_var.set("Arquivo carregado com sucesso")
+            self.text_display.delete(1.0, tk.END)
+            self.text_display.insert(tk.END, message)
+        else:
+            self.status_var.set(message)
+            messagebox.showerror("Erro", message)
+    
+    def analyze_invoice(self):
+        if not self.nf_system.current_file:
+            messagebox.showwarning("Aviso", "Por favor, selecione um arquivo primeiro.")
+            return
+        
+        success, message = self.nf_system.analyze_invoice()
+        if success:
+            self.status_var.set("Análise concluída com sucesso")
+            self.text_display.delete(1.0, tk.END)
+            self.text_display.insert(tk.END, message)
+            if self.nf_system.analysis_result:
+                self.text_display.insert(tk.END, "\n\nANÁLISE DE IA:\n" + self.nf_system.analysis_result)
+        else:
+            self.status_var.set("Erro na análise")
+            messagebox.showerror("Erro", message)
+    
+    def save_results(self):
+        if not self.nf_system.current_result:
+            messagebox.showwarning("Aviso", "Não há resultados para salvar. Por favor, analise uma nota fiscal primeiro.")
+            return
+        
+        success, message = self.nf_system.save_results()
+        if success:
+            self.status_var.set("Resultados salvos com sucesso")
+            messagebox.showinfo("Sucesso", message)
+        else:
+            self.status_var.set("Erro ao salvar")
+            messagebox.showerror("Erro", message)
+    
+    def clear_display(self):
+        self.text_display.delete(1.0, tk.END)
+        self.status_var.set("Pronto")
+    
+    def run(self):
+        self.root.mainloop()
+
 class NFSystem:
     def __init__(self):
         self.audit_tool = InvoiceAuditTool()
@@ -502,16 +588,9 @@ def show_menu():
     Escolha uma opção: """
     return input(menu)
 
-# Example usage
 if __name__ == "__main__":
-    import sys
-    import unittest
-    import argparse
-    
-    # Configuração do parser de argumentos
-    parser = argparse.ArgumentParser(description='Ferramenta de Análise de Nota Fiscal')
-    parser.add_argument('--test', action='store_true', help='Executar suite de testes')
-    parser.add_argument('--file', type=str, help='Caminho para o arquivo XML da nota fiscal a ser analisada')
+    app = NFSystemGUI()
+    app.run()
     args = parser.parse_args()
     
     # Check if --test parameter is provided
