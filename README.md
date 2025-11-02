@@ -119,6 +119,42 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 
 Para suporte, abra uma issue no GitHub ou envie um email para o mantenedor do projeto.
 
+## Release Notes
+
+### Versão 1.1.0 (29 de Outubro, 2025)
+- ✨ **Nova Interface Gráfica**
+  - Adicionada interface gráfica com tkinter
+  - Novo layout mais intuitivo e amigável
+  - Barra de status para feedback visual
+  - Área de visualização com rolagem
+
+- 🔧 **Melhorias no Processamento XML**
+  - Suporte para múltiplas codificações de caracteres
+  - Melhor tratamento de namespaces
+  - Correção de bugs na leitura de arquivos
+
+- 🚀 **Recursos Adicionados**
+  - Análise com IA usando Gemini Pro
+  - Exportação de resultados em formato texto
+  - Envio de relatórios por email
+
+### Versão 1.0.0 (15 de Outubro, 2025)
+- 🎉 **Lançamento Inicial**
+  - Processamento básico de NF-e
+  - Validação de campos obrigatórios
+  - Verificação de cálculos fiscais
+  - Interface de linha de comando
+  - Suporte a arquivos XML de NF-e
+  - Análise fiscal básica
+
+### Próximas Atualizações Planejadas
+- 📊 Geração de gráficos e relatórios visuais
+- 📱 Interface responsiva para diferentes tamanhos de tela
+- 📦 Suporte a processamento em lote de múltiplos arquivos
+- 🔐 Melhorias na segurança e criptografia
+- 🌐 Suporte a múltiplos idiomas
+- 💾 Integração com banco de dados para histórico
+
 ## Autor
 
 - Nome: mrsx0

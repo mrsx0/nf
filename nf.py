@@ -14,6 +14,10 @@ from tkinter import filedialog, messagebox
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+import pdfplumber
+import pytesseract
+from pdf2image import convert_from_path
+import tempfile
 import tkinter as tk
 from tkinter import filedialog
 
@@ -53,6 +57,96 @@ class InvoiceValidator:
                 "012": {"name": "Supplier Y", "tax_regime": "simplified"}
             }
         }
+
+class PDFInvoiceParser:
+    def __init__(self):
+        self.patterns = {
+            'numero_nf': r'NF-e\s*n[º°]?\s*[:.]?\s*(\d+)',
+            'data_emissao': r'Data\s*(?:de)?\s*Emiss[aã]o\s*[:.]?\s*(\d{2}\/\d{2}\/\d{4})',
+            'valor_total': r'Valor\s*Total\s*(?:da\s*Nota)?\s*[:.]?\s*R?\$?\s*([\d\.,]+)',
+            'cnpj_emitente': r'CNPJ\s*(?:do\s*Emitente)?\s*[:.]?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})',
+            'nome_emitente': r'(?:Raz[ãa]o\s*Social|Nome|Emitente)\s*[:.]?\s*([^\n\r]+)',
+            'produto': r'(?:Descri[çc][ãa]o|Produto)\s*[:.]?\s*([^\n\r]+)',
+            'quantidade': r'(?:Qtde?|Quantidade)\s*[:.]?\s*([\d\.,]+)',
+            'valor_unitario': r'(?:Valor|Pre[çc]o)\s*Unit[áa]rio\s*[:.]?\s*R?\$?\s*([\d\.,]+)'
+        }
+
+    def _preprocess_text(self, text: str) -> str:
+        """Prepara o texto para extração de informações."""
+        # Remove espaços extras e quebras de linha desnecessárias
+        text = re.sub(r'\s+', ' ', text)
+        # Normaliza separadores
+        text = text.replace(',', '.').strip()
+        return text
+
+    def _extract_with_pattern(self, text: str, pattern: str, default: str = '') -> str:
+        """Extrai informação do texto usando regex."""
+        match = re.search(pattern, text, re.IGNORECASE)
+        return match.group(1).strip() if match else default
+
+    def _convert_to_float(self, value: str) -> float:
+        """Converte string de valor para float."""
+        try:
+            # Remove caracteres não numéricos exceto ponto e vírgula
+            value = re.sub(r'[^\d,.]', '', value)
+            # Substitui vírgula por ponto
+            value = value.replace(',', '.')
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def extract_from_pdf(self, pdf_path: str) -> Dict:
+        """Extrai informações de nota fiscal de um arquivo PDF."""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                text = ''
+                for page in pdf.pages:
+                    text += page.extract_text() + '\n'
+
+            if not text.strip():
+                # Se não conseguiu extrair texto, tenta OCR
+                images = convert_from_path(pdf_path)
+                text = ''
+                for image in images:
+                    with tempfile.NamedTemporaryFile(suffix='.png') as tmp:
+                        image.save(tmp.name)
+                        text += pytesseract.image_to_string(tmp.name, lang='por') + '\n'
+
+            text = self._preprocess_text(text)
+            
+            # Extrai produtos
+            produtos = []
+            produto_matches = re.finditer(self.patterns['produto'], text)
+            for produto_match in produto_matches:
+                produto_text = text[produto_match.start():]
+                produto = {
+                    'codigo': 'N/A',  # Código geralmente não está disponível em PDFs
+                    'descricao': self._extract_with_pattern(produto_text, self.patterns['produto']),
+                    'quantidade': self._convert_to_float(
+                        self._extract_with_pattern(produto_text, self.patterns['quantidade'], '0')
+                    ),
+                    'valor_unitario': self._convert_to_float(
+                        self._extract_with_pattern(produto_text, self.patterns['valor_unitario'], '0')
+                    ),
+                }
+                produto['valor_total'] = produto['quantidade'] * produto['valor_unitario']
+                produtos.append(produto)
+
+            # Monta o dicionário de dados
+            return {
+                'numero_nf': self._extract_with_pattern(text, self.patterns['numero_nf']),
+                'data_emissao': self._extract_with_pattern(text, self.patterns['data_emissao']),
+                'valor_total': self._convert_to_float(
+                    self._extract_with_pattern(text, self.patterns['valor_total'], '0')
+                ),
+                'emitente': {
+                    'nome': self._extract_with_pattern(text, self.patterns['nome_emitente']),
+                    'cnpj': self._extract_with_pattern(text, self.patterns['cnpj_emitente'])
+                },
+                'produtos': produtos
+            }
+        except Exception as e:
+            raise ValueError(f"Erro ao processar PDF: {str(e)}")
 
 class InvoiceAuditTool(BaseTool):
     name: str = "invoice_auditor"
@@ -436,34 +530,51 @@ class NFSystem:
         root = tk.Tk()
         root.withdraw()  # Hide the main window
         file_path = filedialog.askopenfilename(
-            title="Selecione o arquivo XML da nota fiscal",
-            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+            title="Selecione o arquivo da nota fiscal",
+            filetypes=[
+                ("Arquivos de Nota Fiscal", "*.xml *.pdf"),
+                ("Arquivos XML", "*.xml"),
+                ("Arquivos PDF", "*.pdf"),
+                ("Todos os arquivos", "*.*")
+            ]
         )
         if file_path:
             try:
-                # Tenta diferentes codificações
-                encodings = ['utf-8', 'iso-8859-1', 'latin1', 'cp1252']
-                xml_content = None
+                file_extension = os.path.splitext(file_path)[1].lower()
                 
-                for encoding in encodings:
-                    try:
-                        with open(file_path, 'r', encoding=encoding) as f:
-                            xml_content = f.read()
-                        break
-                    except UnicodeDecodeError:
-                        continue
+                if file_extension == '.xml':
+                    # Processa arquivo XML
+                    encodings = ['utf-8', 'iso-8859-1', 'latin1', 'cp1252']
+                    xml_content = None
+                    
+                    for encoding in encodings:
+                        try:
+                            with open(file_path, 'r', encoding=encoding) as f:
+                                xml_content = f.read()
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    
+                    if xml_content is None:
+                        with open(file_path, 'rb') as f:
+                            xml_content = f.read().decode('utf-8', errors='ignore')
+                    
+                    invoice_data = self.audit_tool._xml_to_dict(xml_content)
                 
-                if xml_content is None:
-                    # Se nenhuma codificação funcionou, tenta leitura binária
-                    with open(file_path, 'rb') as f:
-                        xml_content = f.read().decode('utf-8', errors='ignore')
+                elif file_extension == '.pdf':
+                    # Processa arquivo PDF
+                    pdf_parser = PDFInvoiceParser()
+                    invoice_data = pdf_parser.extract_from_pdf(file_path)
                 
-                invoice_data = self.audit_tool._xml_to_dict(xml_content)
+                else:
+                    return False, "Formato de arquivo não suportado. Use arquivos XML ou PDF."
+                
                 self.current_file = file_path
                 formatted_data = self._format_invoice_data(invoice_data)
                 return True, f"Arquivo selecionado: {file_path}\n\n{formatted_data}"
+            
             except Exception as e:
-                return False, f"Erro ao ler o arquivo: {str(e)}\nTente verificar se o arquivo está em um formato XML válido e se não está corrompido."
+                return False, f"Erro ao ler o arquivo: {str(e)}\nTente verificar se o arquivo está em um formato válido e se não está corrompido."
         return False, "Nenhum arquivo selecionado"
 
     def analyze_invoice(self) -> Tuple[bool, str]:
@@ -577,7 +688,7 @@ class NFSystem:
 
 def show_menu():
     menu = """
-    === SISTEMA DE ANÁLISE DE NOTAS FISCAIS ===
+    === SISTEMA DE ANÁLISE DE NOTAS FISCAIS by uAI ===
     
     1. Selecionar arquivo XML
     2. Analisar nota fiscal
